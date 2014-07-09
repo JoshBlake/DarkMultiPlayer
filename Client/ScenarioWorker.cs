@@ -61,7 +61,7 @@ namespace DarkMultiPlayer
                         psm.moduleRef.Save(scenarioNode);
 
                         string debugString = DarkLog.PrettyPrintConfigNode(scenarioNode);
-                        DarkLog.Debug("Created scenarioNode:\n" + debugString);
+                        DarkLog.Debug("Sending scenarioNode:\n" + debugString);
 
                         scenarioName.Add(psm.moduleName);
                         byte[] data = nodeSerializer.Serialize(scenarioNode);
@@ -118,7 +118,7 @@ namespace DarkMultiPlayer
                 return false;
             }
 
-            DarkLog.Debug("Deserializing ConfigNode for " + entry.scenarioName + " scenario module...");
+            DarkLog.Debug("Received scenario module " + entry.scenarioName);
 
             ConfigNode scenarioNode = nodeSerializer.Deserialize(entry.scenarioData);
 
@@ -128,8 +128,7 @@ namespace DarkMultiPlayer
                 blockScenarioDataSends = true;
                 return false;
             }
-            scenarioNode.AddValue("name", entry.scenarioName);
-
+            
             string scenarioNodeDebugString = DarkLog.PrettyPrintConfigNode(scenarioNode);
             DarkLog.Debug("Searching for existing " + entry.scenarioName + " scenario modules... Data:\n" + scenarioNodeDebugString);
 
@@ -147,14 +146,11 @@ namespace DarkMultiPlayer
                         {
                             ScenarioRunner.RemoveModule(psm.moduleRef);
                         }
+                        
                         psm.moduleRef = ScenarioRunner.fetch.AddModule(scenarioNode);
 
-                        string scenes = string.Join(",", psm.targetScenes.Select(s => s.ToString()).ToArray());
-                        DarkLog.Debug("Target scenes for " + psm.moduleRef.GetType() + ": " + scenes);
-                        psm.targetScenes = psm.moduleRef.targetScenes;
-
-                        scenes = string.Join(",", psm.targetScenes.Select(s => s.ToString()).ToArray());
-                        DarkLog.Debug("Target scenes 2 for " + psm.moduleRef.GetType() + ": " + scenes);
+                        //update targetScenes since ScenarioRunner doesn't set them for whatever reason
+                        psm.moduleRef.targetScenes = psm.targetScenes;
 
                         HighLogic.CurrentGame.scenarios = ScenarioRunner.GetUpdatedProtoModules();
                     }
