@@ -9,17 +9,33 @@ namespace DarkMultiPlayer
 {
     public class ScenarioWorker
     {
+        class ScenarioEntry
+        {
+            public string scenarioName;
+            public string scenarioData;
+        }
+
         public bool workerEnabled = false;
         private static ScenarioWorker singleton;
-        private Queue<ScenarioEntry> scenarioQueue = new Queue<ScenarioEntry>();
+        private Queue<ScenarioEntry> scenarioReceiveQueue = new Queue<ScenarioEntry>();
         private bool blockScenarioDataSends = false;
         private bool loadedScience = false;
         private float lastScenarioSendTime = 0f;
         private const float SEND_SCENARIO_DATA_INTERVAL = 30f;
 
-        private const string ResearchDevelopmentScenarioName = "ResearchAndDevelopment";
+        private const string RESEARCH_AND_DEVELOPMENT_NAME = "ResearchAndDevelopment";
+        private const string DISCOVERED_OBJECTS_NAME = "ScenarioDiscoverableObjects";
 
         private ConfigNodeSerializer nodeSerializer = ConfigNodeSerializer.Instance;
+
+        Dictionary<string, string> scenarioModuleCache = new Dictionary<string, string>();
+        HashSet<string> sendBlockedScenarioModules = new HashSet<string>();
+
+        public ScenarioWorker()
+        {
+            //Don't send asteroid data.
+            sendBlockedScenarioModules.Add(DISCOVERED_OBJECTS_NAME);
+        }
 
         public static ScenarioWorker fetch
         {
@@ -29,19 +45,74 @@ namespace DarkMultiPlayer
             }
         }
 
+        public static void Reset()
+        {
+            lock (Client.eventLock)
+            {
+                if (singleton != null)
+                {
+                    singleton.workerEnabled = false;
+                    Client.updateEvent.Remove(singleton.Update);
+                }
+                singleton = new ScenarioWorker();
+                Client.updateEvent.Add(singleton.Update);
+            }
+        }
+
+        public void QueueScenarioData(string scenarioName, string scenarioData)
+        {
+            ScenarioEntry entry = new ScenarioEntry();
+            entry.scenarioName = scenarioName;
+            entry.scenarioData = scenarioData;
+            scenarioReceiveQueue.Enqueue(entry);
+        }
+
+        public void LoadReceivedScenarioModuleQueueIntoGame()
+        {
+            if (scenarioReceiveQueue.Count == 0)
+            {
+                return;
+            }
+
+            while (scenarioReceiveQueue.Count > 0)
+            {
+                ScenarioEntry entry = scenarioReceiveQueue.Dequeue();
+                bool success = LoadScenarioData(entry);
+
+                if (success)
+                {
+                    CacheScenarioModule(entry.scenarioName, entry.scenarioData);
+                    sendBlockedScenarioModules.Remove(entry.scenarioData);
+                }
+                else
+                {
+                    sendBlockedScenarioModules.Add(entry.scenarioData);
+                }
+
+                if (success && entry.scenarioName == RESEARCH_AND_DEVELOPMENT_NAME)
+                {
+                    loadedScience = true;
+                }
+            }
+        }
+
+        public void CreateBlankScienceIfScienceMissing()
+        {
+            if (!IsScenarioModuleCached(RESEARCH_AND_DEVELOPMENT_NAME) && Client.fetch.gameMode == GameMode.CAREER)
+            {
+                DarkLog.Debug("Creating blank science data");
+                ConfigNode newNode = GetBlankResearchAndDevelopmentNode();
+                CreateNewProtoScenarioModule(RESEARCH_AND_DEVELOPMENT_NAME, newNode);
+            }
+        }
+
         private void Update()
         {
             if (workerEnabled)
             {
-                if (!blockScenarioDataSends)
-                {
-                    if ((UnityEngine.Time.realtimeSinceStartup - lastScenarioSendTime) > SEND_SCENARIO_DATA_INTERVAL)
-                    {
-                        lastScenarioSendTime = UnityEngine.Time.realtimeSinceStartup;
-                        SendScenarioModules();
-                    }
-                }
-                LoadScenarioDataIntoGame();
+                //Load first so we clobber pending changes here rather than clobber the rest of the server
+                LoadReceivedScenarioModuleQueueIntoGame();
+                SendScenarioModules();
             }
         }
 
@@ -49,70 +120,55 @@ namespace DarkMultiPlayer
         {
             List<string> scenarioName = new List<string>();
             List<string> scenarioData = new List<string>();
-            foreach (ProtoScenarioModule psm in HighLogic.CurrentGame.scenarios)
+
+            string moduleNames = "";
+
+            BlockScienceInSandbox();
+
+            List<ProtoScenarioModule> protoModules = ScenarioRunner.GetUpdatedProtoModules();
+            foreach (ProtoScenarioModule psm in protoModules)
             {
-                //Skip sending science data in sandbox mode (If this can even happen?)
-                if (psm != null ? (psm.moduleName != null && psm.moduleRef != null) : false)
+                if (psm != null && psm.moduleName != null && psm.moduleRef != null)
                 {
-                    //Don't send research and develpoment to sandbox servers. Also don't send asteroid data.
-                    if (!(psm.moduleName == ResearchDevelopmentScenarioName && Client.fetch.gameMode == GameMode.SANDBOX) && psm.moduleName != "ScenarioDiscoverableObjects")
+                    if (!sendBlockedScenarioModules.Contains(psm.moduleName))
                     {
                         ConfigNode scenarioNode = new ConfigNode();
                         psm.moduleRef.Save(scenarioNode);
 
-                        string debugString = DarkLog.PrettyPrintConfigNode(scenarioNode);
-                        DarkLog.Debug("Sending scenarioNode:\n" + debugString);
-
-                        scenarioName.Add(psm.moduleName);
                         byte[] data = nodeSerializer.Serialize(scenarioNode);
                         string scenarioNodeString = System.Text.Encoding.UTF8.GetString(data);
 
-                        scenarioData.Add(scenarioNodeString);
+                        if (DidScenarioModuleChange(psm.moduleName, scenarioNodeString))
+                        {
+                            CacheScenarioModule(psm.moduleName, scenarioNodeString);
+
+                            if (moduleNames.Length > 0)
+                            {
+                                moduleNames += ", ";
+                            }
+                            moduleNames += psm.moduleName;
+
+                            scenarioName.Add(psm.moduleName);
+                            scenarioData.Add(scenarioNodeString);
+                        }
                     }
                 }
             }
             if (scenarioName.Count > 0)
             {
-                DarkLog.Debug("Sending " + scenarioName.Count + " scenario modules");
+                DarkLog.Debug("Sending " + scenarioName.Count + " scenario modules: " + moduleNames);
                 NetworkWorker.fetch.SendScenarioModuleData(scenarioName.ToArray(), scenarioData.ToArray());
             }
         }
 
-        public void LoadScenarioDataIntoGame()
+        private bool LoadScenarioData(ScenarioEntry entry)
         {
-            if (scenarioQueue.Count == 0)
-            {
-                return;
-            }
-
-            while (scenarioQueue.Count > 0)
-            {
-                ScenarioEntry entry = scenarioQueue.Dequeue();
-                bool success = LoadScenarioData(entry);
-                if (success && entry.scenarioName == ResearchDevelopmentScenarioName)
-                {
-                    loadedScience = true;
-
-                    //TODO hack - really we want to block on a per scenario module basis
-                    blockScenarioDataSends = false;
-                }
-            }
-            if (!loadedScience && Client.fetch.gameMode == GameMode.CAREER)
-            {
-                DarkLog.Debug("Creating blank science data");
-                ConfigNode newNode = GetBlankResearchAndDevelopmentNode();
-                CreateNewProtoScenarioModule(newNode);
-            }
-        }
-
-        public bool LoadScenarioData(ScenarioEntry entry)
-        {
-            if (entry.scenarioName == "ScenarioDiscoverableObjects")
+            if (entry.scenarioName == DISCOVERED_OBJECTS_NAME)
             {
                 DarkLog.Debug("Skipping loading asteroid data - It is created locally");
                 return false;
             }
-            if (entry.scenarioName == ResearchDevelopmentScenarioName && Client.fetch.gameMode != GameMode.CAREER)
+            if (entry.scenarioName == RESEARCH_AND_DEVELOPMENT_NAME && Client.fetch.gameMode != GameMode.CAREER)
             {
                 DarkLog.Debug("Skipping loading career mode data in sandbox");
                 return false;
@@ -125,53 +181,54 @@ namespace DarkMultiPlayer
             if (scenarioNode == null)
             {
                 DarkLog.Debug(entry.scenarioName + " scenario data failed to create a ConfigNode!");
-                blockScenarioDataSends = true;
                 return false;
             }
-            
+
             string scenarioNodeDebugString = DarkLog.PrettyPrintConfigNode(scenarioNode);
             DarkLog.Debug("Searching for existing " + entry.scenarioName + " scenario modules... Data:\n" + scenarioNodeDebugString);
 
-            bool protoScenarioModuleFound = false;
-            List<ProtoScenarioModule> protoModules = HighLogic.CurrentGame.scenarios;
+            List<ProtoScenarioModule> protoModules = ScenarioRunner.GetUpdatedProtoModules();
             foreach (ProtoScenarioModule psm in protoModules)
             {
                 if (psm.moduleName == entry.scenarioName)
                 {
-                    DarkLog.Debug("Updating existing " + entry.scenarioName + " scenario module");
-                    protoScenarioModuleFound = true;
-                    try
-                    {
-                        if (psm.moduleRef != null)
-                        {
-                            ScenarioRunner.RemoveModule(psm.moduleRef);
-                        }
-                        
-                        psm.moduleRef = ScenarioRunner.fetch.AddModule(scenarioNode);
-
-                        //update targetScenes since ScenarioRunner doesn't set them for whatever reason
-                        psm.moduleRef.targetScenes = psm.targetScenes;
-
-                        HighLogic.CurrentGame.scenarios = ScenarioRunner.GetUpdatedProtoModules();
-                    }
-                    catch (Exception e)
-                    {
-                        DarkLog.Debug("Error loading " + entry.scenarioName + " scenario module, Exception: " + e);
-                        blockScenarioDataSends = true;
-                        return false;
-                    }
-                    break;
+                    //This will happen when a client receives an update from another client for a scenario node after connecting
+                    return UpdateExistingProtoScenarioModule(entry, scenarioNode, psm);
                 }
             }
-            if (!protoScenarioModuleFound)
+
+            //No existing proto scenario module found
+            //This will happen on first connection for all clients
+            DarkLog.Debug("Creating new " + entry.scenarioName + " scenario module");
+            return CreateNewProtoScenarioModule(entry.scenarioName, scenarioNode);
+        }
+
+        private bool UpdateExistingProtoScenarioModule(ScenarioEntry entry, ConfigNode scenarioNode, ProtoScenarioModule psm)
+        {
+            DarkLog.Debug("Updating existing " + entry.scenarioName + " scenario module");
+            try
             {
-                DarkLog.Debug("Loading new " + entry.scenarioName + " scenario module");
-                return CreateNewProtoScenarioModule(scenarioNode);
+                if (psm.moduleRef != null)
+                {
+                    ScenarioRunner.RemoveModule(psm.moduleRef);
+                }
+
+                psm.moduleRef = ScenarioRunner.fetch.AddModule(scenarioNode);
+
+                //update targetScenes since ScenarioRunner doesn't set them for whatever reason
+                psm.moduleRef.targetScenes = psm.targetScenes;
+
+                HighLogic.CurrentGame.scenarios = ScenarioRunner.GetUpdatedProtoModules();
+            }
+            catch (Exception e)
+            {
+                DarkLog.Debug("Error loading " + entry.scenarioName + " scenario module, Exception: " + e);
+                return false;
             }
             return true;
         }
 
-        private bool CreateNewProtoScenarioModule(ConfigNode newNode)
+        private bool CreateNewProtoScenarioModule(string scenarioName, ConfigNode newNode)
         {
             try
             {
@@ -182,10 +239,40 @@ namespace DarkMultiPlayer
             }
             catch (Exception ex)
             {
-                DarkLog.Debug("Error loading new ProtoScenarioModule: " + newNode.GetValue("name") + " Exception: " + ex.ToString());
-                blockScenarioDataSends = true;
+                DarkLog.Debug("Error creating new ProtoScenarioModule: " + scenarioName + " Exception: " + ex.ToString());
                 return false;
             }
+        }
+
+        private void BlockScienceInSandbox()
+        {
+            //Don't send research and develpoment to sandbox servers.
+            if (Client.fetch.gameMode == GameMode.SANDBOX)
+            {
+                sendBlockedScenarioModules.Add(RESEARCH_AND_DEVELOPMENT_NAME);
+            }
+            //we don't remove this block here in case we have to block science elsewhere
+        }
+
+        private bool IsScenarioModuleCached(string scenarioName)
+        {
+            return scenarioModuleCache.ContainsKey(scenarioName);
+        }
+
+        private void CacheScenarioModule(string scenarioName, string scenarioNodeString)
+        {
+            scenarioModuleCache[scenarioName] = scenarioNodeString;
+        }
+
+        private bool DidScenarioModuleChange(string moduleName, string scenarioString)
+        {
+            string previousScenarioString = null;
+            if (scenarioModuleCache.TryGetValue(moduleName, out previousScenarioString))
+            {
+                return previousScenarioString != scenarioString;
+            }
+            //not in cache => yes the module changed. Make us try to send if we never sent this module before.
+            return true;
         }
 
         //Would be nice if we could ask KSP to do this for us...
@@ -207,34 +294,6 @@ namespace DarkMultiPlayer
             newNode.GetNode("Tech").AddValue("part", "parachuteSingle");
             return newNode;
         }
-
-        public void QueueScenarioData(string scenarioName, string scenarioData)
-        {
-            ScenarioEntry entry = new ScenarioEntry();
-            entry.scenarioName = scenarioName;
-            entry.scenarioData = scenarioData;
-            scenarioQueue.Enqueue(entry);
-        }
-
-        public static void Reset()
-        {
-            lock (Client.eventLock)
-            {
-                if (singleton != null)
-                {
-                    singleton.workerEnabled = false;
-                    Client.updateEvent.Remove(singleton.Update);
-                }
-                singleton = new ScenarioWorker();
-                Client.updateEvent.Add(singleton.Update);
-            }
-        }
-    }
-
-    public class ScenarioEntry
-    {
-        public string scenarioName;
-        public string scenarioData;
     }
 }
 

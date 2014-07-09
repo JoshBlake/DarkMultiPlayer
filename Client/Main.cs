@@ -349,7 +349,8 @@ namespace DarkMultiPlayer
             HighLogic.SaveFolder = "DarkMultiPlayer";
             HighLogic.CurrentGame.flightState.universalTime = TimeSyncer.fetch.GetUniverseTime();
             SetGameMode();
-            ScenarioWorker.fetch.LoadScenarioDataIntoGame();
+            ScenarioWorker.fetch.LoadReceivedScenarioModuleQueueIntoGame();
+            ScenarioWorker.fetch.CreateBlankScienceIfScienceMissing();
             AsteroidWorker.fetch.LoadAsteroidScenario();
             VesselWorker.fetch.LoadKerbalsIntoGame();
             VesselWorker.fetch.LoadVesselsIntoGame();
