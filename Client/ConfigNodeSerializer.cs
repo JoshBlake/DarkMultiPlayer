@@ -17,7 +17,20 @@ namespace DarkMultiPlayer
         private PreFormatConfigDelegate PreFormatConfigThunk;
         private RecurseFormatDelegate RecurseFormatThunk;
 
-        public ConfigNodeSerializer()
+        private static ConfigNodeSerializer instance;
+        public static ConfigNodeSerializer Instance
+        {
+            get
+            {
+                if (instance == null)
+                {
+                    instance = new ConfigNodeSerializer();
+                }
+                return instance;
+            }
+        }
+
+        private ConfigNodeSerializer()
         {
             CreateDelegates();
         }
@@ -110,6 +123,24 @@ namespace DarkMultiPlayer
             }
         }
 
+        public ConfigNode Deserialize(string data)
+        {
+            if (PreFormatConfigThunk == null ||
+                RecurseFormatThunk == null)
+            {
+                //if WriteNodeThunk wasn't set in the constructor, can't reflect into it
+                //Use dogey hack fallback
+                return ConvertStringToConfigNode(data);
+            }
+
+            string[] cfgData = data.Split('\n');
+
+            List<string[]> cfg = PreFormatConfigThunk(cfgData);
+            ConfigNode node = RecurseFormatThunk(cfg);
+
+            return node;
+        }
+
         //Fall back methods in case reflection isn't working:
 
         //Welcome to the world of beyond-dodgy. KSP: Expose either these methods or the string data please!
@@ -123,6 +154,34 @@ namespace DarkMultiPlayer
                 {
                     tempFile = Path.GetTempFileName();
                     File.WriteAllBytes(tempFile, configData);
+                    returnNode = ConfigNode.Load(tempFile);
+                }
+                catch (Exception e)
+                {
+                    DarkLog.Debug("Failed to convert byte[] to ConfigNode, Exception " + e);
+                    returnNode = null;
+                }
+                finally
+                {
+                    if (File.Exists(tempFile))
+                    {
+                        File.Delete(tempFile);
+                    }
+                }
+            }
+            return returnNode;
+        }
+
+        private static ConfigNode ConvertStringToConfigNode(string configData)
+        {
+            string tempFile = null;
+            ConfigNode returnNode = null;
+            if (configData != null)
+            {
+                try
+                {
+                    tempFile = Path.GetTempFileName();
+                    File.WriteAllText(tempFile, configData);
                     returnNode = ConfigNode.Load(tempFile);
                 }
                 catch (Exception e)
@@ -167,6 +226,34 @@ namespace DarkMultiPlayer
                 }
             }
             return returnByteArray;
+        }
+
+        private static string ConvertConfigNodeToString(ConfigNode configData)
+        {
+            string tempFile = null;
+            string returnString = null;
+            if (configData != null)
+            {
+                try
+                {
+                    tempFile = Path.GetTempFileName();
+                    configData.Save(tempFile);
+                    returnString = File.ReadAllText(tempFile);
+                }
+                catch (Exception e)
+                {
+                    DarkLog.Debug("Failed to convert byte[] to ConfigNode, Exception " + e);
+                    returnString = null;
+                }
+                finally
+                {
+                    if (File.Exists(tempFile))
+                    {
+                        File.Delete(tempFile);
+                    }
+                }
+            }
+            return returnString;
         }
     }
 }

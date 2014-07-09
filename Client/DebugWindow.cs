@@ -80,7 +80,7 @@ namespace DarkMultiPlayer
         {
             GUILayout.BeginVertical();
             GUI.DragWindow(moveRect);
-            displayFast = GUILayout.Toggle(displayFast, "Fast debug update", buttonStyle);
+            displayFast = GUILayout.Toggle(displayFast, "Fast debugString update", buttonStyle);
             displayNTP = GUILayout.Toggle(displayNTP, "Display NTP/Subspace statistics", buttonStyle);
             if (displayNTP)
             {

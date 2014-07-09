@@ -49,7 +49,7 @@ namespace DarkMultiPlayer
         private object messageEnqueueLock = new object();
         private object messageDequeueLock = new object();
         private Thread sendThread;
-        private ConfigNodeSerializer nodeSerializer = new ConfigNodeSerializer();
+        private ConfigNodeSerializer nodeSerializer = ConfigNodeSerializer.Instance;
         private string serverMotd;
         private bool displayMotd;
 
