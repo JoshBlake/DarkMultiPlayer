@@ -184,9 +184,6 @@ namespace DarkMultiPlayer
                 return false;
             }
 
-            string scenarioNodeDebugString = DarkLog.PrettyPrintConfigNode(scenarioNode);
-            DarkLog.Debug("Searching for existing " + entry.scenarioName + " scenario modules... Data:\n" + scenarioNodeDebugString);
-
             List<ProtoScenarioModule> protoModules = ScenarioRunner.GetUpdatedProtoModules();
             foreach (ProtoScenarioModule psm in protoModules)
             {
