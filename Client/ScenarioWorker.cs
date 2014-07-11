@@ -21,7 +21,7 @@ namespace DarkMultiPlayer
         private bool blockScenarioDataSends = false;
         private bool loadedScience = false;
         private float lastScenarioSendTime = 0f;
-        private const float SEND_SCENARIO_DATA_INTERVAL = 30f;
+        private const float CHECK_SCENARIO_DATA_INTERVAL = 10f;
 
         private const string RESEARCH_AND_DEVELOPMENT_NAME = "ResearchAndDevelopment";
         private const string DISCOVERED_OBJECTS_NAME = "ScenarioDiscoverableObjects";
@@ -30,6 +30,8 @@ namespace DarkMultiPlayer
 
         Dictionary<string, string> scenarioModuleCache = new Dictionary<string, string>();
         HashSet<string> sendBlockedScenarioModules = new HashSet<string>();
+
+        float lastScenarioCheckTime = 0f;
 
         public ScenarioWorker()
         {
@@ -82,11 +84,11 @@ namespace DarkMultiPlayer
                 if (success)
                 {
                     CacheScenarioModule(entry.scenarioName, entry.scenarioData);
-                    sendBlockedScenarioModules.Remove(entry.scenarioData);
+                    sendBlockedScenarioModules.Remove(entry.scenarioName);
                 }
                 else
                 {
-                    sendBlockedScenarioModules.Add(entry.scenarioData);
+                    sendBlockedScenarioModules.Add(entry.scenarioName);
                 }
 
                 if (success && entry.scenarioName == RESEARCH_AND_DEVELOPMENT_NAME)
@@ -112,7 +114,13 @@ namespace DarkMultiPlayer
             {
                 //Load first so we clobber pending changes here rather than clobber the rest of the server
                 LoadReceivedScenarioModuleQueueIntoGame();
-                SendScenarioModules();
+
+                float time = UnityEngine.Time.realtimeSinceStartup; 
+                if ((time - lastScenarioSendTime) > CHECK_SCENARIO_DATA_INTERVAL)
+                {
+                    lastScenarioCheckTime = time;
+                    SendScenarioModules();
+                }
             }
         }
 
@@ -147,9 +155,12 @@ namespace DarkMultiPlayer
                                 moduleNames += ", ";
                             }
                             moduleNames += psm.moduleName;
-
+                            
                             scenarioName.Add(psm.moduleName);
-                            scenarioData.Add(scenarioNodeString);
+
+                            string data64 = CompressionHelper.CompressBase64(scenarioNodeString);
+                            DarkLog.Debug("Compressed from " + scenarioNodeString.Length + " to " + data64.Length);
+                            scenarioData.Add(data64);
                         }
                     }
                 }
@@ -176,7 +187,10 @@ namespace DarkMultiPlayer
 
             DarkLog.Debug("Received scenario module " + entry.scenarioName);
 
-            ConfigNode scenarioNode = nodeSerializer.Deserialize(entry.scenarioData);
+
+            string scenarioDataString = CompressionHelper.DecompressBase64(entry.scenarioData);
+
+            ConfigNode scenarioNode = nodeSerializer.Deserialize(scenarioDataString);
 
             if (scenarioNode == null)
             {

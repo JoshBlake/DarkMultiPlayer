@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -7,7 +7,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{423C5A4B-EA79-450D-BD86-5B46141D58D1}</ProjectGuid>
     <OutputType>Library</OutputType>
-    <RootNamespace>Common</RootNamespace>
+    <RootNamespace>DarkMultiPlayerCommon</RootNamespace>
     <AssemblyName>DarkMultiPlayer-Common</AssemblyName>
     <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
   </PropertyGroup>
@@ -35,7 +35,9 @@
     <Reference Include="System" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="CLZF2.cs" />
     <Compile Include="Common.cs" />
+    <Compile Include="CompressionHelper.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
 </Project>
