@@ -1540,7 +1540,8 @@ namespace DarkMultiPlayer
                 mw.Write<string[]>(scenarioData);
                 newMessage.data = mw.GetMessageBytes();
             }
-            DarkLog.Debug("Sending " + scenarioNames.Length + " scenario modules");
+            string moduleNames = String.Join(", ", scenarioNames);
+            DarkLog.Debug("Sending " + scenarioNames.Length + " scenario modules: " + moduleNames);
             QueueOutgoingMessage(newMessage, false);
         }
         //Called from vesselWorker

@@ -18,12 +18,11 @@ namespace DarkMultiPlayer
         public bool workerEnabled = false;
         private static ScenarioWorker singleton;
         private Queue<ScenarioEntry> scenarioReceiveQueue = new Queue<ScenarioEntry>();
-        private bool blockScenarioDataSends = false;
-        private bool loadedScience = false;
         private const float CHECK_SCENARIO_DATA_INTERVAL = 10f;
 
         private const string RESEARCH_AND_DEVELOPMENT_NAME = "ResearchAndDevelopment";
         private const string DISCOVERED_OBJECTS_NAME = "ScenarioDiscoverableObjects";
+        private const string SCENARIO_CONFIGNODE_NAME = "SCENARIO";
 
         private ConfigNodeSerializer nodeSerializer = ConfigNodeSerializer.Instance;
 
@@ -89,11 +88,6 @@ namespace DarkMultiPlayer
                 {
                     sendBlockedScenarioModules.Add(entry.scenarioName);
                 }
-
-                if (success && entry.scenarioName == RESEARCH_AND_DEVELOPMENT_NAME)
-                {
-                    loadedScience = true;
-                }
             }
         }
 
@@ -101,7 +95,7 @@ namespace DarkMultiPlayer
         {
             if (!IsScenarioModuleCached(RESEARCH_AND_DEVELOPMENT_NAME) && Client.fetch.gameMode == GameMode.CAREER)
             {
-                DarkLog.Debug("Creating blank science data");
+                DarkLog.Debug("Creating blank ResearchAndDevelopment module");
                 ConfigNode newNode = GetBlankResearchAndDevelopmentNode();
                 CreateNewProtoScenarioModule(RESEARCH_AND_DEVELOPMENT_NAME, newNode);
             }
@@ -130,7 +124,7 @@ namespace DarkMultiPlayer
             {
                 if (psm != null && psm.moduleName == moduleName && psm.moduleRef != null)
                 {
-                    ConfigNode scenarioNode = new ConfigNode();
+                    ConfigNode scenarioNode = new ConfigNode(SCENARIO_CONFIGNODE_NAME);
                     psm.moduleRef.Save(scenarioNode);
 
                     byte[] data = nodeSerializer.Serialize(scenarioNode);
@@ -146,8 +140,6 @@ namespace DarkMultiPlayer
             List<string> scenarioName = new List<string>();
             List<string> scenarioData = new List<string>();
 
-            string moduleNames = "";
-
             BlockScienceInSandbox();
 
             List<ProtoScenarioModule> protoModules = ScenarioRunner.GetUpdatedProtoModules();
@@ -157,7 +149,7 @@ namespace DarkMultiPlayer
                 {
                     if (!sendBlockedScenarioModules.Contains(psm.moduleName))
                     {
-                        ConfigNode scenarioNode = new ConfigNode();
+                        ConfigNode scenarioNode = new ConfigNode(SCENARIO_CONFIGNODE_NAME);
                         psm.moduleRef.Save(scenarioNode);
 
                         byte[] data = nodeSerializer.Serialize(scenarioNode);
@@ -167,12 +159,6 @@ namespace DarkMultiPlayer
                         {
                             CacheScenarioModuleString(psm.moduleName, scenarioNodeString);
 
-                            if (moduleNames.Length > 0)
-                            {
-                                moduleNames += ", ";
-                            }
-                            moduleNames += psm.moduleName;
-
                             scenarioName.Add(psm.moduleName);
                             scenarioData.Add(scenarioNodeString);
                         }
@@ -181,7 +167,6 @@ namespace DarkMultiPlayer
             }
             if (scenarioName.Count > 0)
             {
-                DarkLog.Debug("Sending " + scenarioName.Count + " scenario modules: " + moduleNames);
                 NetworkWorker.fetch.SendScenarioModuleData(scenarioName.ToArray(), scenarioData.ToArray());
             }
         }
@@ -234,29 +219,31 @@ namespace DarkMultiPlayer
                 {
                     ScenarioRunner.RemoveModule(psm.moduleRef);
                 }
-
+                
                 psm.moduleRef = ScenarioRunner.fetch.AddModule(scenarioNode);
 
                 //update targetScenes since ScenarioRunner doesn't set them for whatever reason
                 psm.moduleRef.targetScenes = psm.targetScenes;
 
-                HighLogic.CurrentGame.scenarios = ScenarioRunner.GetUpdatedProtoModules();
+                //This should sync the Game with ScenarioRunner
+                HighLogic.CurrentGame.Updated();
+                return true;
             }
             catch (Exception e)
             {
                 DarkLog.Debug("Error loading " + entry.scenarioName + " scenario module, Exception: " + e);
                 return false;
             }
-            return true;
         }
 
-        private bool CreateNewProtoScenarioModule(string scenarioName, ConfigNode newNode)
+        private bool CreateNewProtoScenarioModule(string scenarioName, ConfigNode scenarioNode)
         {
             try
             {
-                ProtoScenarioModule newModule = new ProtoScenarioModule(newNode);
-                HighLogic.CurrentGame.scenarios.Add(newModule);
-                newModule.Load(ScenarioRunner.fetch);
+                ProtoScenarioModule psm = new ProtoScenarioModule(scenarioNode);
+                psm.Load(ScenarioRunner.fetch);
+                HighLogic.CurrentGame.scenarios.Add(psm);
+                ScenarioRunner.SetProtoModules(HighLogic.CurrentGame.scenarios);
                 return true;
             }
             catch (Exception ex)
@@ -273,7 +260,6 @@ namespace DarkMultiPlayer
             {
                 sendBlockedScenarioModules.Add(RESEARCH_AND_DEVELOPMENT_NAME);
             }
-            //we don't remove this block here in case we have to block science elsewhere
         }
 
         private bool IsScenarioModuleCached(string scenarioName)
@@ -298,23 +284,11 @@ namespace DarkMultiPlayer
             return true;
         }
 
-        //Would be nice if we could ask KSP to do this for us...
         private ConfigNode GetBlankResearchAndDevelopmentNode()
         {
-            ConfigNode newNode = new ConfigNode();
-            newNode.AddValue("name", "ResearchAndDevelopment");
+            ConfigNode newNode = new ConfigNode(SCENARIO_CONFIGNODE_NAME);
+            newNode.AddValue("name", RESEARCH_AND_DEVELOPMENT_NAME);
             newNode.AddValue("scene", "5, 6, 7, 8, 9");
-            newNode.AddValue("sci", "0");
-            newNode.AddNode("Tech");
-            newNode.GetNode("Tech").AddValue("id", "start");
-            newNode.GetNode("Tech").AddValue("state", "Available");
-            newNode.GetNode("Tech").AddValue("part", "mk1pod");
-            newNode.GetNode("Tech").AddValue("part", "liquidEngine");
-            newNode.GetNode("Tech").AddValue("part", "solidBooster");
-            newNode.GetNode("Tech").AddValue("part", "fuelTankSmall");
-            newNode.GetNode("Tech").AddValue("part", "trussPiece1x");
-            newNode.GetNode("Tech").AddValue("part", "longAntenna");
-            newNode.GetNode("Tech").AddValue("part", "parachuteSingle");
             return newNode;
         }
     }
