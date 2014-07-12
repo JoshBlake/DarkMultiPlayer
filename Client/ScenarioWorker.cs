@@ -20,7 +20,6 @@ namespace DarkMultiPlayer
         private Queue<ScenarioEntry> scenarioReceiveQueue = new Queue<ScenarioEntry>();
         private bool blockScenarioDataSends = false;
         private bool loadedScience = false;
-        private float lastScenarioSendTime = 0f;
         private const float CHECK_SCENARIO_DATA_INTERVAL = 10f;
 
         private const string RESEARCH_AND_DEVELOPMENT_NAME = "ResearchAndDevelopment";
@@ -83,7 +82,7 @@ namespace DarkMultiPlayer
 
                 if (success)
                 {
-                    CacheScenarioModule(entry.scenarioName, entry.scenarioData);
+                    CacheScenarioModule(entry.scenarioName);
                     sendBlockedScenarioModules.Remove(entry.scenarioName);
                 }
                 else
@@ -115,11 +114,29 @@ namespace DarkMultiPlayer
                 //Load first so we clobber pending changes here rather than clobber the rest of the server
                 LoadReceivedScenarioModuleQueueIntoGame();
 
-                float time = UnityEngine.Time.realtimeSinceStartup; 
-                if ((time - lastScenarioSendTime) > CHECK_SCENARIO_DATA_INTERVAL)
+                float time = UnityEngine.Time.realtimeSinceStartup;
+                if ((time - lastScenarioCheckTime) > CHECK_SCENARIO_DATA_INTERVAL)
                 {
                     lastScenarioCheckTime = time;
                     SendScenarioModules();
+                }
+            }
+        }
+
+        private void CacheScenarioModule(string moduleName)
+        {
+            List<ProtoScenarioModule> protoModules = ScenarioRunner.GetUpdatedProtoModules();
+            foreach (ProtoScenarioModule psm in protoModules)
+            {
+                if (psm != null && psm.moduleName == moduleName && psm.moduleRef != null)
+                {
+                    ConfigNode scenarioNode = new ConfigNode();
+                    psm.moduleRef.Save(scenarioNode);
+
+                    byte[] data = nodeSerializer.Serialize(scenarioNode);
+                    string scenarioNodeString = System.Text.Encoding.UTF8.GetString(data);
+
+                    CacheScenarioModuleString(psm.moduleName, scenarioNodeString);
                 }
             }
         }
@@ -148,19 +165,16 @@ namespace DarkMultiPlayer
 
                         if (DidScenarioModuleChange(psm.moduleName, scenarioNodeString))
                         {
-                            CacheScenarioModule(psm.moduleName, scenarioNodeString);
+                            CacheScenarioModuleString(psm.moduleName, scenarioNodeString);
 
                             if (moduleNames.Length > 0)
                             {
                                 moduleNames += ", ";
                             }
                             moduleNames += psm.moduleName;
-                            
-                            scenarioName.Add(psm.moduleName);
 
-                            string data64 = CompressionHelper.CompressBase64(scenarioNodeString);
-                            DarkLog.Debug("Compressed from " + scenarioNodeString.Length + " to " + data64.Length);
-                            scenarioData.Add(data64);
+                            scenarioName.Add(psm.moduleName);
+                            scenarioData.Add(scenarioNodeString);
                         }
                     }
                 }
@@ -187,10 +201,7 @@ namespace DarkMultiPlayer
 
             DarkLog.Debug("Received scenario module " + entry.scenarioName);
 
-
-            string scenarioDataString = CompressionHelper.DecompressBase64(entry.scenarioData);
-
-            ConfigNode scenarioNode = nodeSerializer.Deserialize(scenarioDataString);
+            ConfigNode scenarioNode = nodeSerializer.Deserialize(entry.scenarioData);
 
             if (scenarioNode == null)
             {
@@ -270,7 +281,7 @@ namespace DarkMultiPlayer
             return scenarioModuleCache.ContainsKey(scenarioName);
         }
 
-        private void CacheScenarioModule(string scenarioName, string scenarioNodeString)
+        private void CacheScenarioModuleString(string scenarioName, string scenarioNodeString)
         {
             scenarioModuleCache[scenarioName] = scenarioNodeString;
         }
@@ -283,6 +294,7 @@ namespace DarkMultiPlayer
                 return previousScenarioString != scenarioString;
             }
             //not in cache => yes the module changed. Make us try to send if we never sent this module before.
+            DarkLog.Debug("Scenario module " + moduleName + " not cached, we should send it.");
             return true;
         }
 
