@@ -31,10 +31,23 @@ namespace DarkMultiPlayer
 
         float lastScenarioCheckTime = 0f;
 
+        bool isRnGComplexDisplayed = false;
+
         public ScenarioWorker()
         {
             //Don't send asteroid data.
             sendBlockedScenarioModules.Add(DISCOVERED_OBJECTS_NAME);
+
+            Client.updateEvent.Add(Update);
+            GameEvents.onGUIRnDComplexSpawn.Add(new EventVoid.OnEvent(OnGUIRnDComplexSpawn));
+            GameEvents.onGUIRnDComplexDespawn.Add(new EventVoid.OnEvent(onGUIRnDComplexDespawn));
+        }
+
+        public void CleanupEvents()
+        {
+            Client.updateEvent.Remove(Update);
+            GameEvents.onGUIRnDComplexSpawn.Remove(new EventVoid.OnEvent(OnGUIRnDComplexSpawn));
+            GameEvents.onGUIRnDComplexDespawn.Remove(new EventVoid.OnEvent(onGUIRnDComplexDespawn));
         }
 
         public static ScenarioWorker fetch
@@ -52,10 +65,10 @@ namespace DarkMultiPlayer
                 if (singleton != null)
                 {
                     singleton.workerEnabled = false;
-                    Client.updateEvent.Remove(singleton.Update);
+                    singleton.CleanupEvents();
+                    singleton = null;
                 }
                 singleton = new ScenarioWorker();
-                Client.updateEvent.Add(singleton.Update);
             }
         }
 
@@ -83,6 +96,11 @@ namespace DarkMultiPlayer
                 {
                     CacheScenarioModule(entry.scenarioName);
                     sendBlockedScenarioModules.Remove(entry.scenarioName);
+
+                    if (entry.scenarioName == RESEARCH_AND_DEVELOPMENT_NAME)
+                    {
+                        UpdateRnDComplexUI();
+                    }
                 }
                 else
                 {
@@ -137,7 +155,7 @@ namespace DarkMultiPlayer
 
         private void SendScenarioModules()
         {
-            List<string> scenarioName = new List<string>();
+            List<string> scenarioNames = new List<string>();
             List<string> scenarioData = new List<string>();
 
             BlockScienceInSandbox();
@@ -147,7 +165,10 @@ namespace DarkMultiPlayer
             {
                 if (psm != null && psm.moduleName != null && psm.moduleRef != null)
                 {
-                    if (!sendBlockedScenarioModules.Contains(psm.moduleName))
+                    bool isScenarioThisBlocked = sendBlockedScenarioModules.Contains(psm.moduleName);
+                    bool alreadySendingModule = scenarioNames.Contains(psm.moduleName);
+                    
+                    if (!isScenarioThisBlocked && !alreadySendingModule)
                     {
                         ConfigNode scenarioNode = new ConfigNode(SCENARIO_CONFIGNODE_NAME);
                         psm.moduleRef.Save(scenarioNode);
@@ -159,15 +180,15 @@ namespace DarkMultiPlayer
                         {
                             CacheScenarioModuleString(psm.moduleName, scenarioNodeString);
 
-                            scenarioName.Add(psm.moduleName);
+                            scenarioNames.Add(psm.moduleName);
                             scenarioData.Add(scenarioNodeString);
                         }
                     }
                 }
             }
-            if (scenarioName.Count > 0)
+            if (scenarioNames.Count > 0)
             {
-                NetworkWorker.fetch.SendScenarioModuleData(scenarioName.ToArray(), scenarioData.ToArray());
+                NetworkWorker.fetch.SendScenarioModuleData(scenarioNames.ToArray(), scenarioData.ToArray());
             }
         }
 
@@ -282,6 +303,25 @@ namespace DarkMultiPlayer
             //not in cache => yes the module changed. Make us try to send if we never sent this module before.
             DarkLog.Debug("Scenario module " + moduleName + " not cached, we should send it.");
             return true;
+        }
+
+        public void UpdateRnDComplexUI()
+        {
+            if (isRnGComplexDisplayed)
+            {
+                GameEvents.onGUIRnDComplexDespawn.Fire();
+                GameEvents.onGUIRnDComplexSpawn.Fire();
+            }
+        }
+
+        private void OnGUIRnDComplexSpawn()
+        {
+            isRnGComplexDisplayed = (ResearchAndDevelopment.Instance != null);
+        }
+
+        private void onGUIRnDComplexDespawn()
+        {
+            isRnGComplexDisplayed = false;
         }
 
         private ConfigNode GetBlankResearchAndDevelopmentNode()

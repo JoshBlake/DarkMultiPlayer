@@ -315,8 +315,9 @@ namespace DarkMultiPlayer
                             }
                             if (sendText == "/addscience" && Client.fetch.gameMode == GameMode.CAREER)
                             {
-                                //TODO: this is for testing, remove before from production
+                                //TODO: this is for testing, remove before going to production
                                 ResearchAndDevelopment.Instance.Science += 100;
+                                ScenarioWorker.fetch.UpdateRnDComplexUI();
                             }
                         }
                     }
