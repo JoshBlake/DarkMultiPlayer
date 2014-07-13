@@ -313,6 +313,11 @@ namespace DarkMultiPlayer
                             {
                                 NetworkWorker.fetch.SendMotdRequest();
                             }
+                            if (sendText == "/addscience" && Client.fetch.gameMode == GameMode.CAREER)
+                            {
+                                //TODO: this is for testing, remove before from production
+                                ResearchAndDevelopment.Instance.Science += 100;
+                            }
                         }
                     }
                     sendText = "";
